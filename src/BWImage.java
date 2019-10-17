@@ -85,7 +85,7 @@ public class BWImage extends FeatureImage {
         return this.applyFilter(filter);
     }
 
-    public void drawLine(Pixel p1, Pixel p2, float value) {
+    public void drawLine(Point p1, Point p2, float value) {
         int dx = p2.x-p1.x;
         int dy = p2.y-p1.y;
         if (Math.abs(dx) > Math.abs(dy)) {
@@ -122,11 +122,78 @@ public class BWImage extends FeatureImage {
         BWImage out = new BWImage(width, height, image_data);
         for (int x = 0; x < width; x++) {
             for (int y = 0; y < height; y++) {
-                if (get(x, y) < cutoff) {
+                if (get(x, y) <= cutoff) {
                     out.set(x, y, 0);
                 }
             }
         }
         return out;
+    }
+
+    public BWImage binary(float cutoff) {
+        BWImage out = new BWImage(width, height);
+        for (int x = 0; x < width; x++) {
+            for (int y = 0; y < height; y++) {
+                if (get(x, y) > cutoff) {
+                    out.set(x, y, 1);
+                }
+            }
+        }
+        return out;
+    }
+
+    public boolean isLine(Point p1, Point p2) {
+        int dx = p2.x-p1.x;
+        int dy = p2.y-p1.y;
+        boolean isLine = true;
+        if (Math.abs(dx) > Math.abs(dy)) {
+            if (dx>0) {
+                for (int x = 0; x <= dx; x++) {
+                    int y = x*dy/dx;
+                    if (this.get(p1.x+x, p1.y+y) <= 0) {
+                        isLine = false;
+                    }
+                }
+            }
+            else {
+                for (int x = 0; x <= -dx; x++) {
+                    int y = x*dy/dx;
+                    if (this.get(p1.x-x, p1.y-y) <= 0) {
+                        isLine = false;
+                    }
+                }
+            }
+        }
+        else {
+            if (dy>0) {
+                for (int y = 0; y <= dy; y++) {
+                    int x = y*dx/dy;
+                    if (this.get(p1.x+x, p1.y+y) <= 0) {
+                        isLine = false;
+                    }
+                }
+            }
+            else {
+                for (int y = 0; y <= -dy; y++) {
+                    int x = y*dx/dy;
+                    if (this.get(p1.x-x, p1.y-y) <= 0) {
+                        isLine = false;
+                    }
+                }
+            }
+        }
+        return isLine;
+    }
+
+    public boolean isLine(Line line) {
+        return isLine(line.p1, line.p2);
+    }
+
+    public void drawLine(Line line, float value) {
+        drawLine(line.p1, line.p2, value);
+    }
+
+    public void set(Point p, float color) {
+        set(p.x, p.y, color);
     }
 }

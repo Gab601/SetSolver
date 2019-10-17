@@ -1,8 +1,6 @@
-import javax.imageio.ImageIO;
 import java.awt.*;
 import java.awt.image.BufferedImage;
-import java.io.File;
-import java.io.IOException;
+import java.util.ArrayList;
 
 public class RGBImage extends FeatureImage {
 
@@ -52,60 +50,59 @@ public class RGBImage extends FeatureImage {
         return edges;
     }
 
-    public BWImage getCorners(float cutoff, int radius) {
-        BWImage weights = new BWImage(this.width, this.height);
+    public BWImage getCorners(int search_radius, int local_max_radius) {
+        BWImage edges = this.boxBlur(2).getEdges().binary((float)0.03);
+        BWImage out = new BWImage(width, height);
         for (int x = 0; x < width; x++) {
             for (int y = 0; y < height; y++) {
-                float difference_x = 0;
-                float difference_y = 0;
-                for (int dx = -radius; dx <= radius; dx++) {
-                    for (int dy = -radius; dy <= radius; dy++) {
-                        difference_x += Math.abs(get(x+dx, y+dy, 0) - get(x+dx+1, y+dy, 0));
-                        difference_x += Math.abs(get(x+dx, y+dy, 1) - get(x+dx+1, y+dy, 1));
-                        difference_x += Math.abs(get(x+dx, y+dy, 2) - get(x+dx+1, y+dy, 2));
-
-                        difference_y += Math.abs(get(x+dx, y+dy, 0) - get(x+dx, y+dy+1, 0));
-                        difference_y += Math.abs(get(x+dx, y+dy, 1) - get(x+dx, y+dy+1, 1));
-                        difference_y += Math.abs(get(x+dx, y+dy, 2) - get(x+dx, y+dy+1, 2));
+                if (edges.get(x, y) > 0) {
+                    boolean[] lines = new boolean[360];
+                    for (int theta = 0; theta < 360; theta++) {
+                        int dx = (int)(search_radius*Math.cos(theta*6.283/360));
+                        int dy = (int)(search_radius*Math.sin(theta*6.283/360));
+                        if (edges.isLine(new Point(x, y), new Point(x+dx, y+dy))) {
+                            lines[theta] = true;
+                        }
+                        else {
+                            lines[theta] = false;
+                        }
+                    }
+                    for (int theta = 0; theta < 360; theta++) {
+                        if (lines[theta] && lines[(theta+90)%360]) {
+                            int max = theta;
+                            int min = (theta+90)%360;
+                            while (lines[max]) {
+                                max = (max+1)%360;
+                            }
+                            while (lines[min]) {
+                                min = (min+359)%360;
+                            }
+                            out.set(x, y, (float)((max-min+360)%360)/360);
+                        }
                     }
                 }
-                weights.set(x, y, Math.min(difference_x, difference_y)/(radius*radius));
             }
         }
-        BWImage out = new BWImage(this.width, this.height);
         for (int x = 0; x < width; x++) {
             for (int y = 0; y < height; y++) {
-                if (weights.get(x, y) < weights.get(x+1, y+1) ||
-                        weights.get(x, y) < weights.get(x+1, y) ||
-                        weights.get(x, y) < weights.get(x+1, y-1) ||
-                        weights.get(x, y) < weights.get(x, y+1) ||
-                        weights.get(x, y) < weights.get(x, y-1) ||
-                        weights.get(x, y) < weights.get(x-1, y+1) ||
-                        weights.get(x, y) < weights.get(x-1, y) ||
-                        weights.get(x, y) < weights.get(x-1, y-1)) {
-                    out.set(x, y, 0);
-                }
-                else if (weights.get(x, y) < cutoff){
-                    out.set(x, y, 0);
-                }
-                else {
-                    out.set(x, y, weights.get(x, y));
+                for (int dx = -local_max_radius; dx <= local_max_radius; dx++) {
+                    for (int dy = -local_max_radius; dy <= local_max_radius; dy++) {
+                        if (out.get(x, y) < out.get(x+dx, y+dy) && out.get(x, y) > 0) {
+                            out.set(x, y, 0);
+                        }
+                    }
                 }
             }
         }
         return out;
     }
 
-    public BWImage getLines(float corner_cutoff, int corner_radius, float value_cutoff) {
-        BWImage corners = this.boxBlur(3).getCorners(corner_cutoff, corner_radius);
-        BWImage edges = this.boxBlur(2).getEdges();
-        BufferedImage outImage = edges.toImage();
-        try {
-            File outputfile = new File("lines" + Math.random() + ".png");
-            ImageIO.write(outImage, "png", outputfile);
-        }
-        catch (IOException e) { e.printStackTrace(); }
-        BWImage lines = new BWImage(this.width, this.height);
+    public ArrayList<Line> getLines(int corner_radius, int local_max_radius) {
+        BWImage edges = this.boxBlur(2).getEdges().binary((float)0.05).boxBlur(2);
+        BWImage corners = this.getCorners( corner_radius, local_max_radius);
+        ArrayList<Line> lines = new ArrayList<>();
+
+        //Get a list of pixels that have positive value
         int num_corners = 0;
         for (int x = 0; x < width; x++) {
             for (int y = 0; y < height; y++) {
@@ -114,57 +111,89 @@ public class RGBImage extends FeatureImage {
                 }
             }
         }
-        Pixel[] corner_list = new Pixel[num_corners];
+        Point[] corner_list = new Point[num_corners];
         int index = 0;
         for (int x = 0; x < width; x++) {
             for (int y = 0; y < height; y++) {
                 if (corners.get(x, y) > 0) {
-                    corner_list[index] = new Pixel(x, y, corners.get(x, y));
+                    corner_list[index] = new Point(x, y);
                     index++;
                 }
             }
         }
-        for (Pixel corner1: corner_list) {
-            for (Pixel corner2: corner_list) {
-                int dx = (int)(corner2.x-corner1.x);
-                int dy = (int)(corner2.y-corner1.y);
+
+        for (Point corner1: corner_list) {
+            for (Point corner2: corner_list) {
+                int dx = corner2.x-corner1.x;
+                int dy = corner2.y-corner1.y;
                 if ((dx != 0 || dy != 0) && dx >= 0) {
-                    float avg_edge = 0;
-
-                    //Calculate the average value along the corner
-                    if (Math.abs(dx) > Math.abs(dy)) {
-                        for (int x = 0; x <= dx; x++) {
-                            int y = x*dy/dx;
-                            avg_edge += edges.get(corner1.x+x, corner1.y+y);
-                        }
-                        avg_edge = avg_edge/Math.abs(dx);
-                    }
-                    else {
-                        if (dy>0) {
-                            for (int y = 0; y <= dy; y++) {
-                                int x = y*dx/dy;
-                                avg_edge += edges.get(corner1.x+x, corner1.y+y);
-                            }
-                        }
-                        else {
-                            for (int y = 0; y <= -dy; y++) {
-                                int x = y*dx/dy;
-                                avg_edge += edges.get(corner1.x-x, corner1.y-y);
-                            }
-                        }
-                        avg_edge = avg_edge/Math.abs(dy);
-                    }
-
-                    float value = corner1.value*corner2.value*avg_edge*avg_edge;
-                    if (value > value_cutoff) {
-                        //System.out.println(corner1.value + " " + corner2.value + " " + avg_edge);
-                        lines.drawLine(corner1, corner2, 1);
+                    Line l = new Line(corner1, corner2);
+                    if (edges.isLine(l) && l.length() > corner_radius) {
+                        lines.add(l);
                     }
                 }
-
             }
         }
         return lines;
+    }
+
+    public BWImage drawLines(ArrayList<Line> lines) {
+        BWImage out = new BWImage(this.width, this.height);
+        for (Line l: lines) {
+            out.drawLine(l, 1);
+        }
+        return out;
+    }
+
+    public ArrayList<Parallelogram> getPossibleCards(ArrayList<Line> lines, double angle_cutoff) {
+        ArrayList<Parallelogram> parallelograms = new ArrayList<>();
+        for (Line line1: lines) {
+            for (Line line2: lines) {
+                if (line1.sharesEndpointWith(line2) && !line1.equals(line2)) {
+                    Parallelogram p = new Parallelogram(line1, line2);
+                    if (p.angle < (90+angle_cutoff) && p.angle > (90-angle_cutoff)) {
+                        parallelograms.add(new Parallelogram(line1, line2));
+                    }
+                }
+            }
+        }
+        return parallelograms;
+    }
+
+    public BWImage drawParallelograms(ArrayList<Parallelogram> parallelograms) {
+        BWImage out = new BWImage(this.width, this.height);
+        for (Parallelogram parallelogram: parallelograms) {
+            for (Line line: parallelogram.getLines()) {
+                out.drawLine(line, 1);
+                out.set(parallelogram.point0, (float)0.5);
+            }
+        }
+        return out;
+    }
+
+    public RGBImage parallelogramToRectangle(Parallelogram parallelogram, int width, int height) {
+        RGBImage out = new RGBImage(width, height);
+        if (width > height && parallelogram.getLines()[0].length() > parallelogram.getLines()[1].length() || width <= height && parallelogram.getLines()[0].length() <= parallelogram.getLines()[1].length()) {
+            for (int x = 0; x < width; x++) {
+                for (int y = 0; y < width; y++) {
+                    Point bottom_point = parallelogram.point2.times((1 - (double) x / width)).plus(parallelogram.point3.times(((double) x / width)));
+                    Point top_point = parallelogram.point0.times((1 - (double) x / width)).plus(parallelogram.point1.times(((double) x / width)));
+                    Point final_point = bottom_point.times(1 - (double) y / height).plus(top_point.times((double) y / height));
+                    out.set(x, y, this.get(final_point));
+                }
+            }
+        }
+        else {
+            for (int x = 0; x < width; x++) {
+                for (int y = 0; y < width; y++) {
+                    Point bottom_point = parallelogram.point3.times((1-(double)x/width)).plus(parallelogram.point1.times(((double)x/width)));
+                    Point top_point = parallelogram.point2.times((1-(double)x/width)).plus(parallelogram.point0.times(((double)x/width)));
+                    Point final_point = bottom_point.times(1-(double)y/height).plus(top_point.times((double)y/height));
+                    out.set(x, y, this.get(final_point));
+                }
+            }
+        }
+        return out;
     }
 
     public BWImage toBW() {
@@ -184,6 +213,14 @@ public class RGBImage extends FeatureImage {
 
     public float[] get(int x, int y) {
         return new float[] {get(x, y, 0), get(x, y, 1), get(x, y, 2)};
+    }
+
+    public float[] get(Point p) {
+        return get(p.x, p.y);
+    }
+
+    public void set(Point p, float[] color) {
+        set(p.x, p.y, color);
     }
 
     public void set(int x, int y, float[] color) {
